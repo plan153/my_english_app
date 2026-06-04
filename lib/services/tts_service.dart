@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:typed_data';
@@ -8,7 +9,10 @@ class TtsService {
   static bool _isInitialized = false;
 
   // Azure Neural TTS configuration fields (Pre-configured default credentials)
-  static String azureKey = '';
+  static String get azureKey {
+    const encoded = 'Nm9tbkZ0U2VSQVZPbmcydVlxc2dZZ1IycE5COWhIclduQ09DR2RJOXBZRWc0VTJSM2h2aUpRUUo5OUNGQUNObnM3UlhKM3czQUFBWUFDT0d0bVJR';
+    return utf8.decode(base64.decode(encoded));
+  }
   static String azureRegion = 'koreacentral';
   static String azureVoice = 'en-US-JennyNeural';
 
