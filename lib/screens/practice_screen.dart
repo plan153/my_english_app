@@ -125,6 +125,18 @@ class _PracticeScreenState extends State<PracticeScreen> {
         _processDemoInput();
       } else {
         await _speechService.stopListening();
+        // Fallback: If no result was processed within 500ms after manually stopping, process current transcribed text
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted && !_hasResult) {
+            if (_recognizedText.isNotEmpty) {
+              _processRecognitionResult(_recognizedText);
+            } else {
+              setState(() {
+                _statusMessage = TranslationService.get('instruction_no_speech');
+              });
+            }
+          }
+        });
       }
     } else {
       // Start listening
