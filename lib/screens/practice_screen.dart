@@ -701,24 +701,29 @@ class _PracticeScreenState extends State<PracticeScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => TtsService.speak(sentence.text),
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.volume_up, color: Colors.white54, size: 14),
-                          const SizedBox(width: 4),
-                          Text(
-                            TranslationService.get('listen_full'),
-                            style: const TextStyle(color: Colors.white54, fontSize: 11),
-                          ),
-                        ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.volume_up, color: Colors.white54, size: 14),
+                            const SizedBox(width: 4),
+                            Text(
+                              TranslationService.get('listen_full'),
+                              style: const TextStyle(color: Colors.white54, fontSize: 11),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 8),
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () {
                       setState(() {
                         _showTranslation = !_showTranslation;
@@ -726,26 +731,29 @@ class _PracticeScreenState extends State<PracticeScreen> {
                     },
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _showTranslation ? Icons.visibility_off : Icons.visibility,
-                            color: Colors.cyanAccent,
-                            size: 14,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _showTranslation
-                                ? TranslationService.get('hide_translation')
-                                : TranslationService.get('show_translation'),
-                            style: const TextStyle(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _showTranslation ? Icons.visibility_off : Icons.visibility,
                               color: Colors.cyanAccent,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
+                              size: 14,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            Text(
+                              _showTranslation
+                                  ? TranslationService.get('hide_translation')
+                                  : TranslationService.get('show_translation'),
+                              style: const TextStyle(
+                                color: Colors.cyanAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
