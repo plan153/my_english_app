@@ -51,7 +51,11 @@ class AudioPlayerHelper {
     try {
       if (_audioElement != null) {
         _audioElement!.pause();
-        _audioElement!.currentTime = 0;
+        try {
+          _audioElement!.currentTime = 0;
+        } catch (_) {
+          // Ignore if metadata is not loaded yet
+        }
       }
       _cleanupBlob();
     } catch (e) {
@@ -61,6 +65,11 @@ class AudioPlayerHelper {
 
   static void _cleanupBlob() {
     if (_currentBlobUrl != null) {
+      try {
+        if (_audioElement != null && _audioElement!.src == _currentBlobUrl) {
+          _audioElement!.src = '';
+        }
+      } catch (_) {}
       try {
         html.Url.revokeObjectUrl(_currentBlobUrl!);
       } catch (e) {

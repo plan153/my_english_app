@@ -7,6 +7,7 @@ import 'audio_player_helper.dart';
 class TtsService {
   static final FlutterTts _flutterTts = FlutterTts();
   static bool _isInitialized = false;
+  static int _currentSpeechId = 0;
 
   // Azure Neural TTS configuration fields (Pre-configured default credentials)
   static String get azureKey {
@@ -37,6 +38,10 @@ class TtsService {
   /// Speaks the given text aloud. Interrupts any active speech.
   /// Uses Azure Neural TTS if credentials are saved, falling back to local TTS on failure.
   static Future<void> speak(String text) async {
+    if (text.trim().isEmpty) return;
+
+    final speechId = ++_currentSpeechId;
+
     // Prime/unlock the audio element synchronously under the user's gesture
     if (isAzureEnabled) {
       AudioPlayerHelper.prePlay();
@@ -47,6 +52,12 @@ class TtsService {
     if (isAzureEnabled) {
       try {
         final bytes = await _fetchAzureTtsAudio(text);
+        
+        // If a newer speech request has started in the meantime, discard this result
+        if (speechId != _currentSpeechId) {
+          return;
+        }
+
         if (bytes != null) {
           await AudioPlayerHelper.playBytes(bytes);
           return; // Azure TTS playback started successfully
@@ -57,6 +68,7 @@ class TtsService {
     }
 
     // Local Fallback Mode
+    if (speechId != _currentSpeechId) return;
     await init();
     try {
       await _flutterTts.speak(text);
@@ -110,6 +122,7 @@ class TtsService {
 
   /// Stops any currently playing speech.
   static Future<void> stop() async {
+    _currentSpeechId++; // Invalidate any pending in-flight speech requests
     try {
       await AudioPlayerHelper.stop();
     } catch (e) {
