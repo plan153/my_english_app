@@ -17,7 +17,7 @@ class AudioPlayerHelper {
 
       // Prime the audio element synchronously under the user gesture.
       // We set a tiny silent WAV data URL.
-      _audioElement!.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAAA";
+      _audioElement!.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=";
       _audioElement!.load();
       _audioElement!.play().catchError((e) {
         print("Web Audio priming failed/prevented: $e");
