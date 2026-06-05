@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_practice_app/models/practice_sentence.dart';
-import 'package:speech_practice_app/services/sentence_storage_service.dart';
+import 'package:my_english_app/models/practice_sentence.dart';
+import 'package:my_english_app/services/sentence_storage_service.dart';
 
 void main() {
   group('SentenceStorageService and PracticeSentence Tests', () {

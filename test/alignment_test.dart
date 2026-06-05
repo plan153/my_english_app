@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:speech_practice_app/models/practice_sentence.dart';
-import 'package:speech_practice_app/services/alignment_service.dart';
+import 'package:my_english_app/models/practice_sentence.dart';
+import 'package:my_english_app/services/alignment_service.dart';
 
 void main() {
   group('AlignmentService Tests', () {

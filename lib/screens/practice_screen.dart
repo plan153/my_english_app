@@ -241,14 +241,14 @@ class _PracticeScreenState extends State<PracticeScreen> {
                       children: [
                         const Icon(Icons.inbox, color: Colors.white24, size: 64),
                         const SizedBox(height: 16),
-                        const Text(
-                          'No practice sentences found.',
-                          style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.bold),
+                        Text(
+                          TranslationService.get('no_sentences'),
+                          style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Please go to the Admin Panel to add or upload sentences.',
-                          style: TextStyle(color: Colors.white38, fontSize: 13),
+                        Text(
+                          TranslationService.get('admin_guide'),
+                          style: const TextStyle(color: Colors.white38, fontSize: 13),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
@@ -260,7 +260,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           icon: const Icon(Icons.admin_panel_settings),
-                          label: const Text('Go to Admin Panel', style: TextStyle(fontWeight: FontWeight.bold)),
+                          label: Text(TranslationService.get('go_admin'), style: const TextStyle(fontWeight: FontWeight.bold)),
                           onPressed: () async {
                             final changed = await Navigator.push<bool>(
                               context,
@@ -433,12 +433,12 @@ class _PracticeScreenState extends State<PracticeScreen> {
                         border: const OutlineInputBorder(),
                       ),
                       style: const TextStyle(color: Colors.white, fontSize: 14),
-                      items: const [
-                        DropdownMenuItem(value: 'en-US-JennyNeural', child: Text('Jenny (Female - Default)')),
-                        DropdownMenuItem(value: 'en-US-GuyNeural', child: Text('Guy (Male)')),
-                        DropdownMenuItem(value: 'en-US-AriaNeural', child: Text('Aria (Female - Educational)')),
-                        DropdownMenuItem(value: 'en-GB-SoniaNeural', child: Text('Sonia (Female - UK)')),
-                        DropdownMenuItem(value: 'en-GB-RyanNeural', child: Text('Ryan (Male - UK)')),
+                      items: [
+                        DropdownMenuItem(value: 'en-US-JennyNeural', child: Text(TranslationService.get('voice_jenny'))),
+                        DropdownMenuItem(value: 'en-US-GuyNeural', child: Text(TranslationService.get('voice_guy'))),
+                        DropdownMenuItem(value: 'en-US-AriaNeural', child: Text(TranslationService.get('voice_aria'))),
+                        DropdownMenuItem(value: 'en-GB-SoniaNeural', child: Text(TranslationService.get('voice_sonia'))),
+                        DropdownMenuItem(value: 'en-GB-RyanNeural', child: Text(TranslationService.get('voice_ryan'))),
                       ],
                       onChanged: (val) {
                         if (val != null) {

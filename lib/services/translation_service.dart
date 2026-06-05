@@ -82,6 +82,14 @@ class TranslationService {
     'admin_success_import': '데이터베이스 업로드 완료!',
     'admin_sentence_added': '새 문장이 추가되었습니다.',
     'admin_btn_delete': '삭제',
+    'no_sentences': '등록된 연습 문장이 없습니다.',
+    'admin_guide': '관리자 패널로 이동하여 문장을 추가하거나 업로드해 주세요.',
+    'go_admin': '관리자 패널로 이동',
+    'voice_jenny': '제니 (여성 - 기본)',
+    'voice_guy': '가이 (남성)',
+    'voice_aria': '아리아 (여성 - 교육용)',
+    'voice_sonia': '소니아 (여성 - 영국 발음)',
+    'voice_ryan': '라이언 (남성 - 영국 발음)',
   };
 
   /// English fallback translations map
@@ -155,5 +163,13 @@ class TranslationService {
     'admin_success_import': 'Database imported successfully!',
     'admin_sentence_added': 'New sentence added successfully.',
     'admin_btn_delete': 'Delete',
+    'no_sentences': 'No practice sentences found.',
+    'admin_guide': 'Please go to the Admin Panel to add or upload sentences.',
+    'go_admin': 'Go to Admin Panel',
+    'voice_jenny': 'Jenny (Female - Default)',
+    'voice_guy': 'Guy (Male)',
+    'voice_aria': 'Aria (Female - Educational)',
+    'voice_sonia': 'Sonia (Female - UK)',
+    'voice_ryan': 'Ryan (Male - UK)',
   };
 }
