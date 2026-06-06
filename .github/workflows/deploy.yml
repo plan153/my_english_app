@@ -37,7 +37,7 @@ jobs:
         run: flutter pub get
 
       - name: Build Flutter Web (Production)
-        run: flutter build web --release --no-tree-shake-icons
+        run: flutter build web --release --no-tree-shake-icons --base-href "/my_english_app/"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
