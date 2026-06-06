@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pronunciation_engine/pronunciation_engine.dart';
 
@@ -105,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
             fontWeight: FontWeight.bold,
             height: 1.25,
           ),
-        ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.1),
+        ),
         const SizedBox(height: 10),
         Text(
           _t('home_subtitle'),
@@ -114,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
             fontSize: 15,
             height: 1.4,
           ),
-        ).animate().fadeIn(delay: 150.ms, duration: 400.ms),
+        ),
       ],
     );
   }
@@ -153,7 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-        ).animate().fadeIn(delay: 250.ms, duration: 400.ms);
+        );
       },
     );
   }
@@ -215,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    ).animate().fadeIn(delay: 350.ms).scale(begin: const Offset(0.97, 0.97));
+    );
   }
 
   Widget _buildLevelsSection() {

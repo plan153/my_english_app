@@ -35,8 +35,6 @@ dependencies:
   google_fonts: ^6.1.0
   # 네비게이션 (리디자인)
   go_router: ^14.2.0
-  # UI 애니메이션 (리디자인)
-  flutter_animate: ^4.5.0
 
 dev_dependencies:
   flutter_test:
