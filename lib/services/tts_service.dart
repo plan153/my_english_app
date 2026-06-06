@@ -1,7 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
-import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_player_helper.dart';
 
@@ -63,9 +64,20 @@ class TtsService {
   static Future<void> speak(String text) async {
     if (text.trim().isEmpty) return;
 
+    // 이 요청의 ID 확보. (stop()은 더 이상 카운터를 증가시키지 않으므로
+    // 이후 가드는 "더 새로운 speak 호출이 있었는가"만 정확히 판별한다.)
     final speechId = ++_currentSpeechId;
 
-    // Prime/unlock the audio element synchronously under the user's gesture
+    // 웹: Azure REST 엔드포인트는 브라우저 CORS 정책상 호출이 차단되므로
+    // 브라우저 내장 TTS(flutter_tts → SpeechSynthesis)를 직접 사용한다.
+    if (kIsWeb) {
+      await _flutterTts.stop();
+      if (speechId != _currentSpeechId) return;
+      await _speakLocal(text);
+      return;
+    }
+
+    // 네이티브: 사용자 제스처 컨텍스트에서 오디오 엘리먼트를 동기적으로 언락
     if (isAzureEnabled) {
       AudioPlayerHelper.prePlay();
     }
@@ -75,12 +87,7 @@ class TtsService {
     if (isAzureEnabled) {
       try {
         final bytes = await _fetchAzureTtsAudio(text);
-        
-        // If a newer speech request has started in the meantime, discard this result
-        if (speechId != _currentSpeechId) {
-          return;
-        }
-
+        if (speechId != _currentSpeechId) return;
         if (bytes != null) {
           await AudioPlayerHelper.playBytes(bytes);
           return; // Azure TTS playback started successfully
@@ -92,6 +99,11 @@ class TtsService {
 
     // Local Fallback Mode
     if (speechId != _currentSpeechId) return;
+    await _speakLocal(text);
+  }
+
+  /// 기기 내장 TTS로 재생한다 (웹: 브라우저 SpeechSynthesis, 네이티브: 플랫폼 TTS).
+  static Future<void> _speakLocal(String text) async {
     await init();
     try {
       await _flutterTts.setSpeechRate(speechRate);
@@ -148,8 +160,12 @@ class TtsService {
   }
 
   /// Stops any currently playing speech.
+  ///
+  /// 주의: 여기서 _currentSpeechId를 증가시키면 안 된다. speak()가 내부에서
+  /// stop()을 호출하므로, 증가시키면 자기 자신의 speechId 가드가 깨져
+  /// 재생 직전에 항상 return 되는 버그가 발생한다. ID 무효화는 speak() 진입 시
+  /// (++_currentSpeechId) 한 곳에서만 수행한다.
   static Future<void> stop() async {
-    _currentSpeechId++; // Invalidate any pending in-flight speech requests
     try {
       await AudioPlayerHelper.stop();
     } catch (e) {
