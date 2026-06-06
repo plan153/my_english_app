@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:typed_data';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_player_helper.dart';
 
 class TtsService {
@@ -9,13 +10,35 @@ class TtsService {
   static bool _isInitialized = false;
   static int _currentSpeechId = 0;
 
+  static double speechRate = 0.45;
+  static String azureRegion = 'koreacentral';
+  static String azureVoice = 'en-US-JennyNeural';
+
   // Azure Neural TTS configuration fields (Pre-configured default credentials)
   static String get azureKey {
     const encoded = 'Nm9tbkZ0U2VSQVZPbmcydVlxc2dZZ1IycE5COWhIclduQ09DR2RJOXBZRWc0VTJSM2h2aUpRUUo5OUNGQUNObnM3UlhKM3czQUFBWUFDT0d0bVJR';
     return utf8.decode(base64.decode(encoded));
   }
-  static String azureRegion = 'koreacentral';
-  static String azureVoice = 'en-US-JennyNeural';
+
+  static Future<void> loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      speechRate = prefs.getDouble('tts_speech_rate') ?? 0.45;
+      azureVoice = prefs.getString('tts_azure_voice') ?? 'en-US-JennyNeural';
+    } catch (e) {
+      print('TtsService loadSettings error: $e');
+    }
+  }
+
+  static Future<void> saveSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('tts_speech_rate', speechRate);
+      await prefs.setString('tts_azure_voice', azureVoice);
+    } catch (e) {
+      print('TtsService saveSettings error: $e');
+    }
+  }
 
   /// Check whether Azure credentials are provided
   static bool get isAzureEnabled =>
@@ -26,7 +49,7 @@ class TtsService {
     if (_isInitialized) return;
     try {
       await _flutterTts.setLanguage('en-US');
-      await _flutterTts.setSpeechRate(0.45); // Slower speech rate for clear pronunciation guide
+      await _flutterTts.setSpeechRate(speechRate);
       await _flutterTts.setVolume(1.0);
       await _flutterTts.setPitch(1.0);
       _isInitialized = true;
@@ -71,6 +94,7 @@ class TtsService {
     if (speechId != _currentSpeechId) return;
     await init();
     try {
+      await _flutterTts.setSpeechRate(speechRate);
       await _flutterTts.speak(text);
     } catch (e) {
       print('Local TTS speak error for "$text": $e');
@@ -93,10 +117,13 @@ class TtsService {
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&apos;');
 
+    final prosodyRate = (speechRate / 0.5 * 100).toInt();
     final ssml = '''
 <speak version='1.0' xml:lang='en-US'>
   <voice xml:lang='en-US' name='$voice'>
-    $escapedText
+    <prosody rate="${prosodyRate}%">
+      $escapedText
+    </prosody>
   </voice>
 </speak>
 ''';

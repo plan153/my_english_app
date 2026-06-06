@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:my_english_app/models/practice_sentence.dart';
+import 'package:pronunciation_engine/pronunciation_engine.dart';
 import 'package:my_english_app/services/alignment_service.dart';
 
 void main() {

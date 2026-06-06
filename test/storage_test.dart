@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:my_english_app/models/practice_sentence.dart';
+import 'package:pronunciation_engine/pronunciation_engine.dart';
 import 'package:my_english_app/services/sentence_storage_service.dart';
 
 void main() {

@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
-import '../models/practice_sentence.dart';
-import '../services/speech_service.dart';
-import '../services/alignment_service.dart';
-import '../services/tts_service.dart';
-import '../services/translation_service.dart';
-import '../services/sentence_storage_service.dart';
-import 'admin_screen.dart';
-import 'widgets/mic_button.dart';
-import 'widgets/comparison_text.dart';
+import 'package:go_router/go_router.dart';
+import 'package:pronunciation_engine/pronunciation_engine.dart';
 
+import '../app/theme.dart';
+import '../services/alignment_service.dart';
+import '../services/progress_service.dart';
+import '../services/sentence_storage_service.dart';
+import '../services/speech_service.dart';
+import '../services/translation_service.dart';
+import '../services/tts_service.dart';
+import 'widgets/comparison_text.dart';
+import 'widgets/mic_button.dart';
+
+/// 듣기 + 발음 연습 화면.
+///
+/// 상단의 문장/청크/단어 세그먼트로 연습 단위를 고르고, 듣기(TTS)로 원어민
+/// 발음을 들은 뒤 마이크로 따라 말하면 단어 단위 채점 결과를 보여준다.
 class PracticeScreen extends StatefulWidget {
-  const PracticeScreen({Key? key}) : super(key: key);
+  const PracticeScreen({super.key});
 
   @override
   State<PracticeScreen> createState() => _PracticeScreenState();
@@ -23,33 +30,51 @@ class _PracticeScreenState extends State<PracticeScreen> {
   bool _isLoading = true;
 
   int _currentIndex = 0;
+  PracticeLevel _level = PracticeLevel.sentence;
+  int _chunkIndex = 0;
+  int _wordIndex = 0;
+
   bool _isListening = false;
-  String _statusMessage = 'Tap the microphone and read the sentence aloud';
   String _recognizedText = '';
-  
-  // Results
+  bool _showTranslation = true;
+
+  // 결과
+  bool _hasResult = false;
   double _score = 0.0;
   List<AlignmentWord> _alignedWords = [];
-  String _feedbackText = '';
-  bool _hasResult = false;
-  bool _showTranslation = true; // Meaning translation toggle state (Default: ON)
+  String _feedback = '';
+  String _statusMessage = '';
 
-  // Simulator controls
+  // 데모(시뮬레이션) 모드
   bool _useDemoMode = false;
-  double _simulatedAccuracy = 0.8; // default 80% accuracy for mock speech
-  String? _focusedWord; // Null if practicing the full sentence
-  String? _focusedChunk; // Null if practicing a specific chunk
+  double _simAccuracy = 0.8;
+
+  String _t(String key) => TranslationService.get(key);
 
   @override
   void initState() {
     super.initState();
-    _initializeSpeech();
-    _loadStoredSentences();
+    _initSpeech();
+    _loadSentences();
+    _loadTtsSettings();
   }
 
-  Future<void> _loadStoredSentences() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadTtsSettings() async {
+    await TtsService.loadSettings();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _initSpeech() async {
+    await _speechService.initialize();
+    if (!mounted) return;
+    setState(() => _useDemoMode = _speechService.useDemoMode);
+  }
+
+  Future<void> _loadSentences() async {
     final loaded = await SentenceStorageService.loadSentences();
+    if (!mounted) return;
     setState(() {
       _sentences = loaded;
       if (_currentIndex >= _sentences.length) {
@@ -60,35 +85,40 @@ class _PracticeScreenState extends State<PracticeScreen> {
     });
   }
 
-  Future<void> _initializeSpeech() async {
-    await _speechService.initialize();
-    setState(() {
-      _useDemoMode = _speechService.useDemoMode;
-      if (_useDemoMode) {
-        _statusMessage = TranslationService.get('instruction_demo');
-      }
-    });
-  }
+  PracticeSentence? get _current =>
+      _sentences.isEmpty ? null : _sentences[_currentIndex];
 
-  void _onPrevSentence() {
-    if (_currentIndex > 0) {
-      setState(() {
-        _currentIndex--;
-        _focusedWord = null;
-        _focusedChunk = null;
-        _resetSession();
-      });
+  /// 현재 연습 단위에 해당하는 목표 텍스트.
+  String get _target {
+    final s = _current;
+    if (s == null) return '';
+    switch (_level) {
+      case PracticeLevel.sentence:
+        return s.text;
+      case PracticeLevel.chunk:
+        if (s.chunks.isNotEmpty && _chunkIndex < s.chunks.length) {
+          return s.chunks[_chunkIndex];
+        }
+        return s.text;
+      case PracticeLevel.word:
+        final words = s.words;
+        if (words.isNotEmpty && _wordIndex < words.length) {
+          return words[_wordIndex];
+        }
+        return s.text;
     }
   }
 
-  void _onNextSentence() {
-    if (_currentIndex < _sentences.length - 1) {
-      setState(() {
-        _currentIndex++;
-        _focusedWord = null;
-        _focusedChunk = null;
-        _resetSession();
-      });
+  /// 결과 표시에 사용할 청크 그룹.
+  List<String> get _comparisonChunks {
+    final s = _current;
+    if (s == null) return const [];
+    switch (_level) {
+      case PracticeLevel.sentence:
+        return s.chunks.isNotEmpty ? s.chunks : [s.text];
+      case PracticeLevel.chunk:
+      case PracticeLevel.word:
+        return [_target];
     }
   }
 
@@ -96,110 +126,117 @@ class _PracticeScreenState extends State<PracticeScreen> {
     _recognizedText = '';
     _score = 0.0;
     _alignedWords = [];
-    _feedbackText = '';
+    _feedback = '';
     _hasResult = false;
     _isListening = false;
-    
-    if (_useDemoMode) {
-      _statusMessage = TranslationService.get('instruction_demo');
-    } else if (_focusedWord != null) {
-      _statusMessage = TranslationService.get('instruction_focus_word')
-          .replaceAll('%word', _focusedWord!);
-    } else if (_focusedChunk != null) {
-      _statusMessage = TranslationService.get('instruction_focus_chunk')
-          .replaceAll('%chunk', _focusedChunk!);
-    } else {
-      _statusMessage = TranslationService.get('instruction_default');
+    _statusMessage =
+        _useDemoMode ? _t('instruction_demo') : _t('instruction_default');
+  }
+
+  void _changeLevel(PracticeLevel level) {
+    setState(() {
+      _level = level;
+      _chunkIndex = 0;
+      _wordIndex = 0;
+      _resetSession();
+    });
+  }
+
+  void _onPrev() {
+    if (_currentIndex > 0) {
+      setState(() {
+        _currentIndex--;
+        _chunkIndex = 0;
+        _wordIndex = 0;
+        _resetSession();
+      });
+    }
+  }
+
+  void _onNext() {
+    if (_currentIndex < _sentences.length - 1) {
+      setState(() {
+        _currentIndex++;
+        _chunkIndex = 0;
+        _wordIndex = 0;
+        _resetSession();
+      });
     }
   }
 
   Future<void> _toggleListening() async {
     if (_isListening) {
-      // Stop listening
       setState(() {
         _isListening = false;
-        _statusMessage = TranslationService.get('instruction_analyzing');
+        _statusMessage = _t('instruction_analyzing');
       });
-      
       if (_useDemoMode) {
-        _processDemoInput();
+        _runDemo();
       } else {
         await _speechService.stopListening();
-        // Fallback: If no result was processed within 500ms after manually stopping, process current transcribed text
-        Future.delayed(const Duration(milliseconds: 500), () {
+        Future.delayed(const Duration(milliseconds: 400), () {
           if (mounted && !_hasResult) {
             if (_recognizedText.isNotEmpty) {
-              _processRecognitionResult(_recognizedText);
+              _processResult(_recognizedText);
             } else {
-              setState(() {
-                _statusMessage = TranslationService.get('instruction_no_speech');
-              });
+              setState(() => _statusMessage = _t('instruction_no_speech'));
             }
           }
         });
       }
-    } else {
-      // Start listening
-      _resetSession();
-      setState(() {
-        _isListening = true;
-        _statusMessage = TranslationService.get('instruction_listening');
-      });
-
-      if (_useDemoMode) {
-        // Just keep listening state, simulation is triggered on stop
-      } else {
-        await _speechService.startListening(
-          onResult: (text, isFinal) {
-            setState(() {
-              _recognizedText = text;
-              if (isFinal) {
-                _processRecognitionResult(text);
-              }
-            });
-          },
-          onStatus: (status) {
-            debugPrint('Listening status callback: $status');
-            if ((status == 'notListening' || status == 'done') && _isListening) {
-              setState(() {
-                _isListening = false;
-                _statusMessage = TranslationService.get('instruction_analyzing');
-              });
-              // Fallback: If we haven't processed a result yet but recognition has stopped,
-              // run the analysis with whatever words were transcribed.
-              Future.delayed(const Duration(milliseconds: 300), () {
-                if (mounted && !_hasResult) {
-                  if (_recognizedText.isNotEmpty) {
-                    _processRecognitionResult(_recognizedText);
-                  } else {
-                    setState(() {
-                      _statusMessage = TranslationService.get('instruction_no_speech');
-                    });
-                  }
-                }
-              });
-            }
-          },
-        );
-      }
+      return;
     }
-  }
 
-  void _processDemoInput() {
-    _speechService.simulateSpeechInput(
-      targetSentence: _focusedWord ?? _focusedChunk ?? _sentences[_currentIndex].text,
-      accuracy: _simulatedAccuracy,
+    _resetSession();
+    setState(() {
+      _isListening = true;
+      _statusMessage = _t('instruction_listening');
+    });
+
+    if (_useDemoMode) return; // 데모는 정지 시 시뮬레이션
+
+    await _speechService.startListening(
       onResult: (text, isFinal) {
         setState(() {
           _recognizedText = text;
-          _processRecognitionResult(text);
+          if (isFinal) _processResult(text);
+        });
+      },
+      onStatus: (status) {
+        if ((status == 'notListening' || status == 'done') && _isListening) {
+          setState(() {
+            _isListening = false;
+            _statusMessage = _t('instruction_analyzing');
+          });
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted && !_hasResult) {
+              if (_recognizedText.isNotEmpty) {
+                _processResult(_recognizedText);
+              } else {
+                setState(() => _statusMessage = _t('instruction_no_speech'));
+              }
+            }
+          });
+        }
+      },
+    );
+  }
+
+  void _runDemo() {
+    _speechService.simulateSpeechInput(
+      targetSentence: _target,
+      accuracy: _simAccuracy,
+      onResult: (text, isFinal) {
+        setState(() {
+          _recognizedText = text;
+          _processResult(text);
         });
       },
     );
   }
 
-  void _processRecognitionResult(String recognized) {
-    final target = _focusedWord ?? _focusedChunk ?? _sentences[_currentIndex].text;
+  void _processResult(String recognized) {
+    final target = _target;
     final aligned = AlignmentService.alignSentences(target, recognized);
     final score = AlignmentService.calculateOverallScore(target, recognized);
     final feedback = AlignmentService.generateFeedbackText(aligned);
@@ -207,357 +244,279 @@ class _PracticeScreenState extends State<PracticeScreen> {
     setState(() {
       _alignedWords = aligned;
       _score = score;
-      _feedbackText = feedback;
+      _feedback = feedback;
       _hasResult = true;
       _isListening = false;
-      _statusMessage = TranslationService.get('instruction_complete');
+      _statusMessage = _t('instruction_complete');
     });
+
+    final s = _current;
+    if (s != null) {
+      ProgressService.recordAttempt(PracticeAttempt(
+        sentenceId: s.id,
+        level: _level,
+        score: score,
+        timestamp: DateTime.now(),
+      ));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
-        backgroundColor: Color(0xFF0F172A),
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.cyanAccent),
-        ),
+        backgroundColor: AppColors.bgTop,
+        body: Center(child: CircularProgressIndicator(color: AppColors.accent)),
       );
     }
-
-    if (_sentences.isEmpty) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF0F172A),
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(30.0),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.inbox, color: Colors.white24, size: 64),
-                        const SizedBox(height: 16),
-                        Text(
-                          TranslationService.get('no_sentences'),
-                          style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          TranslationService.get('admin_guide'),
-                          style: const TextStyle(color: Colors.white38, fontSize: 13),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.cyan,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          icon: const Icon(Icons.admin_panel_settings),
-                          label: Text(TranslationService.get('go_admin'), style: const TextStyle(fontWeight: FontWeight.bold)),
-                          onPressed: () async {
-                            final changed = await Navigator.push<bool>(
-                              context,
-                              MaterialPageRoute(builder: (context) => const AdminScreen()),
-                            );
-                            if (changed == true) {
-                              _loadStoredSentences();
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final currentSentence = _sentences[_currentIndex];
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0F172A), Color(0xFF1E293B)], // Dark slate gradients
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+        decoration: const BoxDecoration(gradient: AppColors.bgGradient),
+        child: SafeArea(
+          child: _current == null
+              ? _buildEmpty()
+              : Column(
+                  children: [
+                    _buildHeader(),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildLevelSelector(),
+                            const SizedBox(height: 16),
+                            _buildTargetCard(_current!),
+                            const SizedBox(height: 20),
+                            if (_hasResult) ...[
+                              _buildScore(),
+                              const SizedBox(height: 16),
+                              _buildAlignment(),
+                              const SizedBox(height: 16),
+                              _buildFeedback(),
+                            ] else
+                              _buildInstructions(),
+                            const SizedBox(height: 30),
+                          ],
+                        ),
+                      ),
+                    ),
+                    _buildControlPanel(),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Column(
+      children: [
+        _buildHeader(),
+        Expanded(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(30),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.inbox, color: Colors.white24, size: 64),
+                  const SizedBox(height: 16),
+                  Text(
+                    _t('no_sentences'),
+                    style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _t('admin_guide'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 13),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: Colors.black,
+                    ),
+                    icon: const Icon(Icons.admin_panel_settings),
+                    label: Text(_t('go_admin')),
+                    onPressed: () =>
+                        context.push('/admin').then((_) => _loadSentences()),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Header
-              _buildHeader(),
-              
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Target Sentence Card
-                      _buildTargetCard(currentSentence),
-                      
-                      const SizedBox(height: 24),
-                      
-                      // Results Display
-                      if (_hasResult) ...[
-                        _buildScoreDisplay(),
-                        const SizedBox(height: 24),
-                        _buildAlignmentDisplay(),
-                        const SizedBox(height: 20),
-                        _buildFeedbackCard(),
-                      ] else ...[
-                        _buildInstructionsCard(),
-                      ],
-                      
-                      const SizedBox(height: 40),
-                    ],
-                  ),
-                ),
-              ),
+      ],
+    );
+  }
 
-              // Bottom control area
-              _buildControlPanel(),
-            ],
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: () => context.pop(),
+            icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
+          ),
+          Text(
+            _useDemoMode ? _t('demo_active') : _t('live_mic'),
+            style: TextStyle(
+              color: _useDemoMode ? Colors.purpleAccent : AppColors.accent,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            onPressed: () {
+              setState(() => TranslationService.isKorean =
+                  !TranslationService.isKorean);
+              _resetSession();
+            },
+            icon: const Icon(Icons.translate, color: AppColors.textSecondary),
+            tooltip: TranslationService.isKorean ? '한글/ENG' : 'KOR/ENG',
+          ),
+          IconButton(
+            onPressed: _showSettings,
+            icon: const Icon(Icons.settings, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLevelSelector() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          for (final level in PracticeLevel.values)
+            Expanded(child: _levelTab(level)),
+        ],
+      ),
+    );
+  }
+
+  Widget _levelTab(PracticeLevel level) {
+    final selected = _level == level;
+    final label =
+        TranslationService.isKorean ? level.labelKo : level.labelEn;
+    return GestureDetector(
+      onTap: () => _changeLevel(level),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          gradient: selected ? AppColors.brandGradient : null,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: selected ? Colors.white : AppColors.textMuted,
+            fontSize: 14,
+            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
           ),
         ),
       ),
     );
   }
 
-  void _showSettingsDialog() {
-    String selectedVoice = TtsService.azureVoice;
-    bool localUseDemo = _useDemoMode;
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1E293B),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: Row(
-                children: [
-                  const Icon(Icons.settings, color: Colors.cyanAccent),
-                  const SizedBox(width: 10),
-                  Text(TranslationService.get('settings_title'), style: const TextStyle(color: Colors.white)),
-                ],
+  Widget _buildTargetCard(PracticeSentence s) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppTheme.cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${_t('sentence_label')} ${_currentIndex + 1}/${_sentences.length}',
+                style: const TextStyle(
+                    color: AppColors.textMuted, fontSize: 12),
               ),
-              content: SingleChildScrollView(
-                child: Column(
+              GestureDetector(
+                onTap: () =>
+                    setState(() => _showTranslation = !_showTranslation),
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Speech Engine Mode
+                    Icon(
+                      _showTranslation
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: AppColors.accent,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 4),
                     Text(
-                      TranslationService.get('settings_mode'),
-                      style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.04),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Column(
-                        children: [
-                          RadioListTile<bool>(
-                            title: Text(TranslationService.get('settings_mode_real'), style: const TextStyle(color: Colors.white, fontSize: 14)),
-                            subtitle: Text(TranslationService.get('settings_mode_real_sub'), style: const TextStyle(fontSize: 11)),
-                            value: false,
-                            groupValue: localUseDemo,
-                            activeColor: Colors.cyanAccent,
-                            onChanged: (val) {
-                              setDialogState(() => localUseDemo = val!);
-                            },
-                          ),
-                          RadioListTile<bool>(
-                            title: Text(TranslationService.get('settings_mode_demo'), style: const TextStyle(color: Colors.white, fontSize: 14)),
-                            subtitle: Text(TranslationService.get('settings_mode_demo_sub'), style: const TextStyle(fontSize: 11)),
-                            value: true,
-                            groupValue: localUseDemo,
-                            activeColor: Colors.cyanAccent,
-                            onChanged: (val) {
-                              setDialogState(() => localUseDemo = val!);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    
-                    // Azure Neural TTS Voice Actor Config
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          TranslationService.get('settings_voice'),
-                          style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            TranslationService.get('settings_active'),
-                            style: const TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedVoice,
-                      dropdownColor: const Color(0xFF1E293B),
-                      decoration: InputDecoration(
-                        labelText: TranslationService.get('settings_voice_label'),
-                        labelStyle: const TextStyle(color: Colors.white38, fontSize: 12),
-                        border: const OutlineInputBorder(),
-                      ),
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      items: [
-                        DropdownMenuItem(value: 'en-US-JennyNeural', child: Text(TranslationService.get('voice_jenny'))),
-                        DropdownMenuItem(value: 'en-US-GuyNeural', child: Text(TranslationService.get('voice_guy'))),
-                        DropdownMenuItem(value: 'en-US-AriaNeural', child: Text(TranslationService.get('voice_aria'))),
-                        DropdownMenuItem(value: 'en-GB-SoniaNeural', child: Text(TranslationService.get('voice_sonia'))),
-                        DropdownMenuItem(value: 'en-GB-RyanNeural', child: Text(TranslationService.get('voice_ryan'))),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          selectedVoice = val;
-                        }
-                      },
+                      _showTranslation
+                          ? _t('hide_translation')
+                          : _t('show_translation'),
+                      style: const TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(TranslationService.get('settings_cancel'), style: const TextStyle(color: Colors.white54)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.cyan),
-                  onPressed: () {
-                    setState(() {
-                      _useDemoMode = localUseDemo;
-                      _speechService.useDemoMode = localUseDemo;
-                      TtsService.azureVoice = selectedVoice;
-                      _resetSession();
-                    });
-                    Navigator.pop(context);
-                  },
-                  child: Text(TranslationService.get('settings_save'), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.all(20.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'PronouncePro',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _useDemoMode 
-                    ? TranslationService.get('demo_active') 
-                    : TranslationService.get('live_mic'),
-                style: TextStyle(
-                  color: _useDemoMode ? Colors.purpleAccent : const Color(0xFF00E5FF),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
             ],
           ),
-          
+          const SizedBox(height: 16),
+          _buildHighlightedText(s),
+          if (_showTranslation && _level == PracticeLevel.sentence) ...[
+            const SizedBox(height: 10),
+            Text(
+              s.translation,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.55),
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          if (_level == PracticeLevel.chunk) _buildChunkChips(s),
+          if (_level == PracticeLevel.word) _buildWordChips(s),
+          const SizedBox(height: 8),
           Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Language Toggle Button (Korean / English Flags)
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    TranslationService.isKorean = !TranslationService.isKorean;
-                    _resetSession(); // Re-localize active status messages
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(16),
+              _listenButton(),
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: _currentIndex > 0 ? _onPrev : null,
+                    icon: const Icon(Icons.arrow_back_ios, size: 18),
+                    color: AppColors.textPrimary,
+                    disabledColor: Colors.white10,
                   ),
-                  child: Row(
-                    children: [
-                      Text(
-                        TranslationService.isKorean ? '🇰🇷 한글' : '🇺🇸 ENG',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.translate, color: Colors.cyanAccent, size: 14),
-                    ],
+                  IconButton(
+                    onPressed: _currentIndex < _sentences.length - 1
+                        ? _onNext
+                        : null,
+                    icon: const Icon(Icons.arrow_forward_ios, size: 18),
+                    color: AppColors.textPrimary,
+                    disabledColor: Colors.white10,
                   ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              IconButton(
-                icon: const Icon(Icons.admin_panel_settings, color: Colors.white70),
-                tooltip: TranslationService.isKorean ? '관리자 모드' : 'Admin Panel',
-                onPressed: () async {
-                  final changed = await Navigator.push<bool>(
-                    context,
-                    MaterialPageRoute(builder: (context) => const AdminScreen()),
-                  );
-                  if (changed == true) {
-                    _loadStoredSentences();
-                  }
-                },
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(Icons.settings, color: Colors.white70),
-                onPressed: _showSettingsDialog,
+                ],
               ),
             ],
           ),
@@ -566,350 +525,205 @@ class _PracticeScreenState extends State<PracticeScreen> {
     );
   }
 
-  Widget _buildRichTargetText(String fullText, String? focusedWord, String? focusedChunk) {
-    if (focusedWord == null && focusedChunk == null) {
+  Widget _buildHighlightedText(PracticeSentence s) {
+    if (_level == PracticeLevel.sentence) {
       return Text(
-        fullText,
+        s.text,
         style: const TextStyle(
-          color: Colors.white,
+          color: AppColors.textPrimary,
           fontSize: 22,
           fontWeight: FontWeight.w600,
           height: 1.4,
         ),
       );
     }
-
-    final String highlightText = focusedWord ?? focusedChunk!;
-    final int index = fullText.toLowerCase().indexOf(highlightText.toLowerCase());
-    
-    if (index == -1) {
+    final highlight = _target;
+    final full = s.text;
+    final idx = full.toLowerCase().indexOf(highlight.toLowerCase());
+    if (idx == -1) {
       return Text(
-        fullText,
+        highlight,
         style: const TextStyle(
-          color: Colors.white,
-          fontSize: 22,
-          fontWeight: FontWeight.w600,
-          height: 1.4,
+          color: AppColors.accent,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
         ),
       );
     }
-
-    final String prefix = fullText.substring(0, index);
-    final String match = fullText.substring(index, index + highlightText.length);
-    final String suffix = fullText.substring(index + highlightText.length);
-
     return RichText(
       text: TextSpan(
         style: const TextStyle(
-          color: Colors.white,
           fontSize: 22,
           fontWeight: FontWeight.w600,
           height: 1.4,
           fontFamily: 'Outfit',
         ),
         children: [
-          TextSpan(text: prefix, style: const TextStyle(color: Colors.white30)),
           TextSpan(
-            text: match,
+              text: full.substring(0, idx),
+              style: const TextStyle(color: Colors.white30)),
+          TextSpan(
+            text: full.substring(idx, idx + highlight.length),
             style: const TextStyle(
-              color: Colors.cyanAccent,
+              color: AppColors.accent,
               fontWeight: FontWeight.bold,
               decoration: TextDecoration.underline,
-              decorationColor: Colors.cyanAccent,
+              decorationColor: AppColors.accent,
             ),
           ),
-          TextSpan(text: suffix, style: const TextStyle(color: Colors.white30)),
+          TextSpan(
+              text: full.substring(idx + highlight.length),
+              style: const TextStyle(color: Colors.white30)),
         ],
       ),
     );
   }
 
-  String _getCategoryText(String rawCategory) {
-    if (rawCategory.contains('Easy')) {
-      return TranslationService.get('easy');
-    } else if (rawCategory.contains('Medium')) {
-      return TranslationService.get('medium');
-    } else if (rawCategory.contains('Hard')) {
-      return TranslationService.get('hard');
-    }
-    return rawCategory;
-  }
-
-  Widget _buildTargetCard(PracticeSentence sentence) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1E293B), Color(0xFF334155)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  Widget _buildChunkChips(PracticeSentence s) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_t('pick_chunk'),
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var i = 0; i < s.chunks.length; i++)
+              _chip(s.chunks[i], i == _chunkIndex, () {
+                setState(() {
+                  _chunkIndex = i;
+                  _resetSession();
+                });
+              }),
+          ],
         ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.white10, width: 1),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  _getCategoryText(sentence.category),
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              Text(
-                '${TranslationService.get('sentence_label')} ${_currentIndex + 1}/${_sentences.length}',
-                style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                TranslationService.get('target_phrase'),
-                style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => TtsService.speak(sentence.text),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.volume_up, color: Colors.white54, size: 14),
-                            const SizedBox(width: 4),
-                            Text(
-                              TranslationService.get('listen_full'),
-                              style: const TextStyle(color: Colors.white54, fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      setState(() {
-                        _showTranslation = !_showTranslation;
-                      });
-                    },
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _showTranslation ? Icons.visibility_off : Icons.visibility,
-                              color: Colors.cyanAccent,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _showTranslation
-                                  ? TranslationService.get('hide_translation')
-                                  : TranslationService.get('show_translation'),
-                              style: const TextStyle(
-                                color: Colors.cyanAccent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _buildRichTargetText(sentence.text, _focusedWord, _focusedChunk),
-          if (_showTranslation) ...[
-            const SizedBox(height: 10),
-            Text(
-              sentence.translation,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.55),
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                height: 1.4,
-              ),
-            ),
+      ],
+    );
+  }
+
+  Widget _buildWordChips(PracticeSentence s) {
+    final words = s.words;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_t('pick_word'),
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var i = 0; i < words.length; i++)
+              _chip(words[i], i == _wordIndex, () {
+                setState(() {
+                  _wordIndex = i;
+                  _resetSession();
+                });
+              }),
           ],
-          if (_focusedWord != null || _focusedChunk != null) ...[
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.cyan.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.cyan.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.gps_fixed, color: Colors.cyanAccent, size: 14),
-                      const SizedBox(width: 8),
-                      Text(
-                        _focusedWord != null
-                            ? '${TranslationService.get('focus_word')}: "${_focusedWord}"'
-                            : '${TranslationService.get('focus_chunk')}: "${_focusedChunk}"',
-                        style: const TextStyle(
-                          color: Colors.cyanAccent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Speak active focus target
-                      GestureDetector(
-                        onTap: () {
-                          final textToSpeak = _focusedWord ?? _focusedChunk;
-                          if (textToSpeak != null) {
-                            TtsService.speak(textToSpeak);
-                          }
-                        },
-                        child: const Icon(Icons.volume_up, color: Colors.cyanAccent, size: 16),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _focusedWord = null;
-                            _focusedChunk = null;
-                            _resetSession();
-                          });
-                        },
-                        child: const Icon(Icons.cancel, color: Colors.white70, size: 16),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: _currentIndex > 0 ? _onPrevSentence : null,
-                icon: const Icon(Icons.arrow_back_ios),
-                color: Colors.white,
-                disabledColor: Colors.white10,
-              ),
-              IconButton(
-                onPressed: _currentIndex < _sentences.length - 1 ? _onNextSentence : null,
-                icon: const Icon(Icons.arrow_forward_ios),
-                color: Colors.white,
-                disabledColor: Colors.white10,
-              ),
-            ],
+        ),
+      ],
+    );
+  }
+
+  Widget _chip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accent.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? AppColors.accent
+                : Colors.white.withValues(alpha: 0.1),
           ),
-        ],
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? AppColors.accent : AppColors.textSecondary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildInstructionsCard() {
+  Widget _listenButton() {
+    return GestureDetector(
+      onTap: () => TtsService.speak(_target),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.accent.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.volume_up, color: AppColors.accent, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              _t('listen'),
+              style: const TextStyle(
+                  color: AppColors.accent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInstructions() {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
+      decoration: AppTheme.panelDecoration(),
       child: Column(
         children: [
-          Icon(
-            Icons.record_voice_over,
-            size: 48,
-            color: Colors.white.withOpacity(0.2),
-          ),
-          const SizedBox(height: 16),
+          Icon(Icons.record_voice_over,
+              size: 44, color: Colors.white.withValues(alpha: 0.2)),
+          const SizedBox(height: 14),
           Text(
             _statusMessage,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 15,
-              height: 1.5,
-            ),
+                color: AppColors.textSecondary, fontSize: 15, height: 1.5),
           ),
           if (_useDemoMode) ...[
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             const Divider(color: Colors.white10),
-            const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  TranslationService.get('sim_accuracy'),
-                  style: const TextStyle(color: Colors.white54, fontSize: 13),
-                ),
-                Text(
-                  '${(_simulatedAccuracy * 100).toInt()}%',
-                  style: TextStyle(
-                    color: _simulatedAccuracy > 0.8 ? Colors.greenAccent : Colors.orangeAccent,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
+                Text(_t('sim_accuracy'),
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 13)),
+                Text('${(_simAccuracy * 100).toInt()}%',
+                    style: TextStyle(
+                        color: _simAccuracy > 0.8
+                            ? AppColors.success
+                            : AppColors.warning,
+                        fontWeight: FontWeight.bold)),
               ],
             ),
             Slider(
-              value: _simulatedAccuracy,
+              value: _simAccuracy,
               min: 0.3,
               max: 1.0,
               divisions: 7,
               activeColor: Colors.purpleAccent,
               inactiveColor: Colors.white10,
-              onChanged: (val) {
-                setState(() {
-                  _simulatedAccuracy = val;
-                });
-              },
+              onChanged: (v) => setState(() => _simAccuracy = v),
             ),
           ],
         ],
@@ -917,73 +731,52 @@ class _PracticeScreenState extends State<PracticeScreen> {
     );
   }
 
-  Widget _buildScoreDisplay() {
-    Color scoreColor;
-    if (_score >= 85.0) {
-      scoreColor = const Color(0xFF00E676); // Green
-    } else if (_score >= 60.0) {
-      scoreColor = Colors.orangeAccent;
-    } else {
-      scoreColor = const Color(0xFFFF5252); // Red
-    }
-
+  Widget _buildScore() {
+    final color = AppColors.forScore(_score);
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
+      decoration: AppTheme.panelDecoration(),
       child: Row(
         children: [
           Stack(
             alignment: Alignment.center,
             children: [
               SizedBox(
-                width: 80,
-                height: 80,
+                width: 76,
+                height: 76,
                 child: CircularProgressIndicator(
                   value: _score / 100.0,
                   backgroundColor: Colors.white10,
-                  color: scoreColor,
+                  color: color,
                   strokeWidth: 8,
                 ),
               ),
-              Text(
-                '${_score.toInt()}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text('${_score.toInt()}',
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold)),
             ],
           ),
-          const SizedBox(width: 24),
+          const SizedBox(width: 20),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  TranslationService.get('score_title'),
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(_t('score_title'),
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 13)),
                 const SizedBox(height: 6),
                 Text(
-                  _score >= 85.0
-                      ? TranslationService.get('feedback_excellent')
-                      : _score >= 60.0
-                          ? TranslationService.get('feedback_decent')
-                          : TranslationService.get('feedback_poor'),
+                  _score >= 85
+                      ? _t('feedback_excellent')
+                      : _score >= 60
+                          ? _t('feedback_decent')
+                          : _t('feedback_poor'),
                   style: TextStyle(
-                    color: scoreColor,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      color: color,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold),
                 ),
               ],
             ),
@@ -993,108 +786,44 @@ class _PracticeScreenState extends State<PracticeScreen> {
     );
   }
 
-  Widget _buildAlignmentDisplay() {
-    final currentSentence = _sentences[_currentIndex];
+  Widget _buildAlignment() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
+      decoration: AppTheme.panelDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            TranslationService.get('detail_title'),
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-            ),
-          ),
+          Text(_t('detail_title'),
+              style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
           ComparisonText(
             alignedWords: _alignedWords,
-            chunks: _focusedWord != null
-                ? [_focusedWord!]
-                : (_focusedChunk != null ? [_focusedChunk!] : currentSentence.chunks),
-            onWordTap: (tappedWord) {
-              setState(() {
-                _focusedWord = tappedWord;
-                _focusedChunk = null; // Clear chunk focus
-                _resetSession();
-              });
-              // Show notification snackbar
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(TranslationService.get('toast_focus_word').replaceAll('%word', tappedWord)),
-                  duration: const Duration(seconds: 2),
-                  backgroundColor: const Color(0xFF1E293B),
-                  action: SnackBarAction(
-                    label: TranslationService.isKorean ? '닫기' : 'Dismiss',
-                    textColor: Colors.cyanAccent,
-                    onPressed: () {},
-                  ),
-                ),
-              );
-            },
-            onChunkTap: (tappedChunk) {
-              setState(() {
-                _focusedChunk = tappedChunk;
-                _focusedWord = null; // Clear word focus
-                _resetSession();
-              });
-              // Show notification snackbar
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(TranslationService.get('toast_focus_chunk').replaceAll('%chunk', tappedChunk)),
-                  duration: const Duration(seconds: 2),
-                  backgroundColor: const Color(0xFF1E293B),
-                  action: SnackBarAction(
-                    label: TranslationService.isKorean ? '닫기' : 'Dismiss',
-                    textColor: Colors.cyanAccent,
-                    onPressed: () {},
-                  ),
-                ),
-              );
-            },
+            chunks: _comparisonChunks,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFeedbackCard() {
+  Widget _buildFeedback() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
+      decoration: AppTheme.panelDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            TranslationService.get('tips_title'),
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-            ),
-          ),
+          Text(_t('tips_title'),
+              style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          Text(
-            _feedbackText,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 14,
-              height: 1.5,
-            ),
-          ),
+          Text(_feedback,
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 14, height: 1.5)),
         ],
       ),
     );
@@ -1102,12 +831,10 @@ class _PracticeScreenState extends State<PracticeScreen> {
 
   Widget _buildControlPanel() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        border: Border(
-          top: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
-        ),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+      decoration: const BoxDecoration(
+        color: AppColors.bgTop,
+        border: Border(top: BorderSide(color: Colors.white10)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1116,26 +843,28 @@ class _PracticeScreenState extends State<PracticeScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                _recognizedText.isEmpty ? TranslationService.get('say_words') : '"$_recognizedText"',
+                _recognizedText.isEmpty
+                    ? _t('say_words')
+                    : '"$_recognizedText"',
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
-                  fontStyle: FontStyle.italic,
-                ),
+                    color: AppColors.textSecondary,
+                    fontSize: 15,
+                    fontStyle: FontStyle.italic),
               ),
             ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               IconButton(
-                onPressed: _hasResult ? _resetSession : null,
+                onPressed:
+                    _hasResult ? () => setState(() => _resetSession()) : null,
                 icon: const Icon(Icons.refresh),
-                color: Colors.white70,
+                color: AppColors.textSecondary,
                 disabledColor: Colors.white10,
-                iconSize: 28,
+                iconSize: 26,
               ),
               MicButton(
                 isListening: _isListening,
@@ -1143,32 +872,170 @@ class _PracticeScreenState extends State<PracticeScreen> {
                 onTap: _toggleListening,
               ),
               IconButton(
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      backgroundColor: const Color(0xFF1E293B),
-                      title: Text(TranslationService.get('help_title'), style: const TextStyle(color: Colors.white)),
-                      content: Text(
-                        TranslationService.get('help_content'),
-                        style: const TextStyle(color: Colors.white70, height: 1.5),
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: Text(TranslationService.get('help_gotit')),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                onPressed: _showHelp,
                 icon: const Icon(Icons.help_outline),
-                color: Colors.white70,
-                iconSize: 28,
+                color: AppColors.textSecondary,
+                iconSize: 26,
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  void _showHelp() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(_t('help_title'),
+            style: const TextStyle(color: AppColors.textPrimary)),
+        content: Text(_t('help_content'),
+            style:
+                const TextStyle(color: AppColors.textSecondary, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(_t('help_gotit')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSettings() {
+    var localDemo = _useDemoMode;
+    var selectedVoice = TtsService.azureVoice;
+    var localSpeechRate = TtsService.speechRate;
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text(_t('settings_title'),
+              style: const TextStyle(color: AppColors.textPrimary)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                RadioListTile<bool>(
+                  title: Text(_t('settings_mode_real'),
+                      style: const TextStyle(
+                          color: AppColors.textPrimary, fontSize: 14)),
+                  value: false,
+                  groupValue: localDemo,
+                  activeColor: AppColors.accent,
+                  onChanged: (v) => setDialog(() => localDemo = v!),
+                ),
+                RadioListTile<bool>(
+                  title: Text(_t('settings_mode_demo'),
+                      style: const TextStyle(
+                          color: AppColors.textPrimary, fontSize: 14)),
+                  value: true,
+                  groupValue: localDemo,
+                  activeColor: AppColors.accent,
+                  onChanged: (v) => setDialog(() => localDemo = v!),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedVoice,
+                  dropdownColor: AppColors.surface,
+                  decoration: InputDecoration(
+                    labelText: _t('settings_voice_label'),
+                    labelStyle: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12),
+                    border: const OutlineInputBorder(),
+                  ),
+                  style: const TextStyle(
+                      color: AppColors.textPrimary, fontSize: 14),
+                  items: [
+                    DropdownMenuItem(
+                        value: 'en-US-JennyNeural',
+                        child: Text(_t('voice_jenny'))),
+                    DropdownMenuItem(
+                        value: 'en-US-GuyNeural',
+                        child: Text(_t('voice_guy'))),
+                    DropdownMenuItem(
+                        value: 'en-US-AriaNeural',
+                        child: Text(_t('voice_aria'))),
+                    DropdownMenuItem(
+                        value: 'en-GB-SoniaNeural',
+                        child: Text(_t('voice_sonia'))),
+                    DropdownMenuItem(
+                        value: 'en-GB-RyanNeural',
+                        child: Text(_t('voice_ryan'))),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) selectedVoice = v;
+                  },
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  TranslationService.isKorean ? '원어민 음성 속도' : 'TTS Speech Rate',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      TranslationService.isKorean ? '속도 배율' : 'Speed Multiplier',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                    Text(
+                      '${(localSpeechRate / 0.5).toStringAsFixed(1)}x',
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                Slider(
+                  value: localSpeechRate,
+                  min: 0.25,
+                  max: 0.75,
+                  divisions: 10,
+                  activeColor: AppColors.accent,
+                  inactiveColor: AppColors.textMuted.withOpacity(0.2),
+                  onChanged: (val) {
+                    setDialog(() {
+                      localSpeechRate = val;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(_t('settings_cancel'),
+                  style: const TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style:
+                  ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+              onPressed: () async {
+                TtsService.speechRate = localSpeechRate;
+                TtsService.azureVoice = selectedVoice;
+                await TtsService.saveSettings();
+                setState(() {
+                  _useDemoMode = localDemo;
+                  _speechService.useDemoMode = localDemo;
+                  _resetSession();
+                });
+                Navigator.pop(context);
+              },
+              child: Text(_t('settings_save'),
+                  style: const TextStyle(
+                      color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }

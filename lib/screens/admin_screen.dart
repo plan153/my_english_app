@@ -1,12 +1,11 @@
 import 'dart:convert';
-import 'dart:io' show File;
-import 'dart:js' as js; // Safe import, runs only on Web using kIsWeb check
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import '../models/practice_sentence.dart';
+import 'package:pronunciation_engine/pronunciation_engine.dart';
 import '../services/sentence_storage_service.dart';
 import '../services/translation_service.dart';
+import '../services/file_helper.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({Key? key}) : super(key: key);
@@ -163,8 +162,7 @@ class _AdminScreenState extends State<AdminScreen> {
         } else {
           final path = result.files.first.path;
           if (path != null) {
-            final file = File(path);
-            jsonContent = await file.readAsString();
+            jsonContent = await FileHelper.readFile(path);
           }
         }
 
@@ -220,24 +218,11 @@ class _AdminScreenState extends State<AdminScreen> {
   void _onExportJsonFile() {
     try {
       final String jsonStr = SentenceStorageService.exportToJson(_sentences);
-      
-      if (kIsWeb) {
-        // Trigger a clean browser file download via evaluation of standard JS.
-        // This is safe to compile on macOS/iOS/Android because we do not import dart:html.
-        final encodedJson = Uri.encodeComponent(jsonStr);
-        final jsCode = """
-          (function() {
-            var element = document.createElement('a');
-            element.setAttribute('href', 'data:text/json;charset=utf-8,' + '$encodedJson');
-            element.setAttribute('download', 'sentences.json');
-            element.style.display = 'none';
-            document.body.appendChild(element);
-            element.click();
-            document.body.removeChild(element);
-          })();
-        """;
-        js.context.callMethod('eval', [jsCode]);
 
+      // 웹에서는 브라우저 다운로드를 트리거하고, 네이티브에서는 false를 받아
+      // 아래 다이얼로그(복사용)로 대체한다.
+      final downloaded = FileHelper.triggerDownload('sentences.json', jsonStr);
+      if (downloaded) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('File download triggered.'), backgroundColor: Colors.green),
         );
@@ -273,8 +258,6 @@ class _AdminScreenState extends State<AdminScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isKo = TranslationService.isKorean;
-
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(

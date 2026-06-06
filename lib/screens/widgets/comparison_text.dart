@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../models/practice_sentence.dart';
-import '../../services/alignment_service.dart';
+import 'package:pronunciation_engine/pronunciation_engine.dart';
 import '../../services/translation_service.dart';
 
 
@@ -26,7 +25,7 @@ class ComparisonText extends StatelessWidget {
     for (var chunk in chunks) {
       final chunkCleanWords = chunk
           .split(RegExp(r'\s+'))
-          .map(AlignmentService.cleanWord)
+          .map(TextNormalizer.clean)
           .where((w) => w.isNotEmpty)
           .toList();
       
@@ -125,7 +124,7 @@ class ComparisonText extends StatelessWidget {
   }
 
   Widget _buildClickableWord(String wordToPractice, Widget child) {
-    final cleanWord = AlignmentService.cleanWord(wordToPractice);
+    final cleanWord = TextNormalizer.clean(wordToPractice);
     if (cleanWord.isEmpty) return child;
     return GestureDetector(
       onTap: () => onWordTap?.call(cleanWord),

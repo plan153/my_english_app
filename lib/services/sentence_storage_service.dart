@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/practice_sentence.dart';
+import 'package:pronunciation_engine/pronunciation_engine.dart';
 
 class SentenceStorageService {
   static const String _storageKey = 'practice_sentences_db';
