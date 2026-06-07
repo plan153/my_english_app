@@ -31,6 +31,84 @@
 
   <title>speech_practice_app</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Microsoft Cognitive Services Speech SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
+  <script>
+    window.activeSynthesizers = [];
+
+    window.stopAzureTtsWeb = function() {
+      while (window.activeSynthesizers.length > 0) {
+        const syn = window.activeSynthesizers.pop();
+        try {
+          syn.close();
+        } catch (e) {
+          console.error("Error closing synthesizer: ", e);
+        }
+      }
+    };
+
+    window.playAzureTtsWeb = function(text, key, region, voice, ratePercent) {
+      window.stopAzureTtsWeb();
+      
+      return new Promise((resolve, reject) => {
+        try {
+          if (typeof SpeechSDK === 'undefined') {
+            console.error("SpeechSDK is undefined. Make sure the script is loaded.");
+            reject("Azure Speech SDK is not loaded.");
+            return;
+          }
+          
+          const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
+          const audioConfig = SpeechSDK.AudioConfig.fromDefaultSpeakerOutput();
+          
+          const escapedText = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+            
+          const ssml = `<speak version='1.0' xml:lang='en-US'>
+            <voice xml:lang='en-US' name='${voice}'>
+              <prosody rate="${ratePercent}%">
+                ${escapedText}
+              </prosody>
+            </voice>
+          </speak>`;
+          
+          const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
+          window.activeSynthesizers.push(synthesizer);
+          
+          synthesizer.speakSsmlAsync(
+            ssml,
+            result => {
+              const index = window.activeSynthesizers.indexOf(synthesizer);
+              if (index > -1) {
+                window.activeSynthesizers.splice(index, 1);
+              }
+              synthesizer.close();
+              if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
+                resolve(true);
+              } else {
+                reject("Speech synthesis failed: " + result.errorDetails);
+              }
+            },
+            error => {
+              const index = window.activeSynthesizers.indexOf(synthesizer);
+              if (index > -1) {
+                window.activeSynthesizers.splice(index, 1);
+              }
+              synthesizer.close();
+              reject("Speech synthesis error: " + error);
+            }
+          );
+        } catch (e) {
+          reject("Azure Speech SDK error: " + e.toString());
+        }
+      });
+    };
+  </script>
 </head>
 <body>
   <!--

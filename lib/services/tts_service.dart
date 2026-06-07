@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_player_helper.dart';
+import 'web_tts_helper.dart';
 
 class TtsService {
   static final FlutterTts _flutterTts = FlutterTts();
@@ -50,6 +51,56 @@ class TtsService {
     if (_isInitialized) return;
     try {
       await _flutterTts.setLanguage('en-US');
+
+      // Select the best voice for Web/Chrome to avoid low-quality metallic voices
+      if (kIsWeb) {
+        try {
+          final voices = await _flutterTts.getVoices;
+          if (voices != null && voices is List) {
+            dynamic bestVoice;
+            final priorities = [
+              'google us english',
+              'aria',
+              'samantha',
+              'natural',
+              'google',
+            ];
+
+            for (final keyword in priorities) {
+              for (final voice in voices) {
+                if (voice is Map) {
+                  final name = (voice['name'] ?? '').toString().toLowerCase();
+                  final locale = (voice['locale'] ?? '').toString().toLowerCase();
+                  if (locale.startsWith('en') && name.contains(keyword)) {
+                    bestVoice = voice;
+                    break;
+                  }
+                }
+              }
+              if (bestVoice != null) break;
+            }
+
+            if (bestVoice == null) {
+              for (final voice in voices) {
+                if (voice is Map) {
+                  final locale = (voice['locale'] ?? '').toString().toLowerCase();
+                  if (locale == 'en-us') {
+                    bestVoice = voice;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (bestVoice != null) {
+              await _flutterTts.setVoice(Map<String, String>.from(bestVoice));
+            }
+          }
+        } catch (e) {
+          print('Error filtering web local voices: $e');
+        }
+      }
+
       await _flutterTts.setSpeechRate(speechRate);
       await _flutterTts.setVolume(1.0);
       await _flutterTts.setPitch(1.0);
@@ -82,15 +133,23 @@ class TtsService {
     final speechId = ++_currentSpeechId;
 
     // 웹: Azure REST 엔드포인트는 브라우저 CORS 정책상 호출이 차단되므로
-    // 브라우저 내장 TTS(flutter_tts → SpeechSynthesis)를 직접 사용한다.
-    //
-    // 주의: Chrome에는 speechSynthesis.cancel() 직후 곧바로 speak()를 호출하면
-    // 새 발화가 무시되어 소리가 나지 않는 버그가 있다. 따라서 stop()(=cancel)
-    // 이후 짧은 지연을 두고 speak()를 호출한다.
+    // 브라우저 내장 TTS 또는 WebSockets 기반 Azure Speech SDK(CORS 오류 없음)를 사용한다.
     if (kIsWeb) {
-      await init();
-      await _flutterTts.stop();
+      await stop();
       await Future.delayed(const Duration(milliseconds: 150));
+      if (speechId != _currentSpeechId) return;
+
+      if (isAzureEnabled) {
+        try {
+          final prosodyRate = (speechRate / 0.5 * 100).toInt();
+          await WebTtsHelper.playAzureTts(text, azureKey, azureRegion, azureVoice, prosodyRate);
+          return;
+        } catch (e) {
+          print('Web Azure Speech SDK synthesis failed: $e. Falling back to browser TTS.');
+        }
+      }
+
+      await init();
       if (speechId != _currentSpeechId) return;
       try {
         await _flutterTts.setSpeechRate(speechRate);
@@ -194,6 +253,13 @@ class TtsService {
       await AudioPlayerHelper.stop();
     } catch (e) {
       print('AudioPlayer stop error: $e');
+    }
+    if (kIsWeb) {
+      try {
+        await WebTtsHelper.stopAzureTts();
+      } catch (e) {
+        print('WebTtsHelper stop error: $e');
+      }
     }
     try {
       await _flutterTts.stop();
