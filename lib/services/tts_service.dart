@@ -70,10 +70,21 @@ class TtsService {
 
     // 웹: Azure REST 엔드포인트는 브라우저 CORS 정책상 호출이 차단되므로
     // 브라우저 내장 TTS(flutter_tts → SpeechSynthesis)를 직접 사용한다.
+    //
+    // 주의: Chrome에는 speechSynthesis.cancel() 직후 곧바로 speak()를 호출하면
+    // 새 발화가 무시되어 소리가 나지 않는 버그가 있다. 따라서 stop()(=cancel)
+    // 이후 짧은 지연을 두고 speak()를 호출한다.
     if (kIsWeb) {
+      await init();
       await _flutterTts.stop();
+      await Future.delayed(const Duration(milliseconds: 150));
       if (speechId != _currentSpeechId) return;
-      await _speakLocal(text);
+      try {
+        await _flutterTts.setSpeechRate(speechRate);
+        await _flutterTts.speak(text);
+      } catch (e) {
+        print('Web TTS speak error for "$text": $e');
+      }
       return;
     }
 
