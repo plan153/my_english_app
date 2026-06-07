@@ -12,7 +12,7 @@ class TtsService {
   static bool _isInitialized = false;
   static int _currentSpeechId = 0;
 
-  static double speechRate = 0.45;
+  static double speechRate = 0.5;
   static String azureRegion = 'koreacentral';
   static String azureVoice = 'en-US-AriaNeural';
 
@@ -25,7 +25,7 @@ class TtsService {
   static Future<void> loadSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      speechRate = prefs.getDouble('tts_speech_rate') ?? 0.45;
+      speechRate = prefs.getDouble('tts_speech_rate') ?? 0.5;
       azureVoice = prefs.getString('tts_azure_voice') ?? 'en-US-AriaNeural';
     } catch (e) {
       print('TtsService loadSettings error: $e');
@@ -141,8 +141,8 @@ class TtsService {
 
       if (isAzureEnabled) {
         try {
-          final prosodyRate = (speechRate / 0.5 * 100).toInt();
-          await WebTtsHelper.playAzureTts(text, azureKey, azureRegion, azureVoice, prosodyRate);
+          final rateMultiplier = speechRate / 0.5;
+          await WebTtsHelper.playAzureTts(text, azureKey, azureRegion, azureVoice, rateMultiplier);
           return;
         } catch (e) {
           print('Web Azure Speech SDK synthesis failed: $e. Falling back to browser TTS.');
@@ -212,11 +212,11 @@ class TtsService {
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&apos;');
 
-    final prosodyRate = (speechRate / 0.5 * 100).toInt();
+    final rateMultiplier = speechRate / 0.5;
     final ssml = '''
 <speak version='1.0' xml:lang='en-US'>
   <voice xml:lang='en-US' name='$voice'>
-    <prosody rate="${prosodyRate}%">
+    <prosody rate="$rateMultiplier">
       $escapedText
     </prosody>
   </voice>

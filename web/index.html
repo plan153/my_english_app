@@ -48,7 +48,7 @@
       }
     };
 
-    window.playAzureTtsWeb = function(text, key, region, voice, ratePercent) {
+    window.playAzureTtsWeb = function(text, key, region, voice, rateMultiplier) {
       window.stopAzureTtsWeb();
       
       return new Promise((resolve, reject) => {
@@ -71,7 +71,7 @@
             
           const ssml = `<speak version='1.0' xml:lang='en-US'>
             <voice xml:lang='en-US' name='${voice}'>
-              <prosody rate="${ratePercent}%">
+              <prosody rate="${rateMultiplier}">
                 ${escapedText}
               </prosody>
             </voice>

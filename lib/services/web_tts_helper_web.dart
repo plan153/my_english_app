@@ -1,9 +1,9 @@
 import 'dart:js' as js;
 
 class WebTtsHelper {
-  static Future<void> playAzureTts(String text, String key, String region, String voice, int ratePercent) async {
+  static Future<void> playAzureTts(String text, String key, String region, String voice, double rateMultiplier) async {
     try {
-      js.context.callMethod('playAzureTtsWeb', [text, key, region, voice, ratePercent]);
+      js.context.callMethod('playAzureTtsWeb', [text, key, region, voice, rateMultiplier]);
     } catch (e) {
       print('WebTtsHelper playAzureTts error: $e');
     }
