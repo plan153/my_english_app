@@ -13,7 +13,7 @@ class TtsService {
 
   static double speechRate = 0.45;
   static String azureRegion = 'koreacentral';
-  static String azureVoice = 'en-US-JennyNeural';
+  static String azureVoice = 'en-US-AriaNeural';
 
   // Azure Neural TTS configuration fields (Pre-configured default credentials)
   static String get azureKey {
@@ -25,7 +25,7 @@ class TtsService {
     try {
       final prefs = await SharedPreferences.getInstance();
       speechRate = prefs.getDouble('tts_speech_rate') ?? 0.45;
-      azureVoice = prefs.getString('tts_azure_voice') ?? 'en-US-JennyNeural';
+      azureVoice = prefs.getString('tts_azure_voice') ?? 'en-US-AriaNeural';
     } catch (e) {
       print('TtsService loadSettings error: $e');
     }
