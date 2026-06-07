@@ -59,6 +59,19 @@ class TtsService {
     }
   }
 
+  /// iOS/Safari 등 브라우저 정책상 사용자 제스처 컨텍스트에서 오디오 엔진을 언락하기 위한 함수.
+  /// 사용자가 처음 화면을 터치하는 시점(예: 시작 버튼 등)에 호출하여 강제 활성화합니다.
+  static Future<void> unlockAudioEngine() async {
+    try {
+      await init();
+      await _flutterTts.setVolume(0.0);
+      await _flutterTts.speak(" ");
+      await _flutterTts.setVolume(1.0);
+    } catch (e) {
+      print('TtsService unlockAudioEngine error: $e');
+    }
+  }
+
   /// Speaks the given text aloud. Interrupts any active speech.
   /// Uses Azure Neural TTS if credentials are saved, falling back to local TTS on failure.
   static Future<void> speak(String text) async {

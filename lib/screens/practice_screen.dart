@@ -658,7 +658,10 @@ class _PracticeScreenState extends State<PracticeScreen> {
 
   Widget _listenButton() {
     return GestureDetector(
-      onTap: () => TtsService.speak(_target),
+      onTap: () {
+        TtsService.unlockAudioEngine();
+        TtsService.speak(_target);
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(

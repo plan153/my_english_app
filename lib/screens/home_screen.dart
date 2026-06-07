@@ -5,6 +5,7 @@ import 'package:pronunciation_engine/pronunciation_engine.dart';
 import '../app/theme.dart';
 import '../services/progress_service.dart';
 import '../services/translation_service.dart';
+import '../services/tts_service.dart';
 
 /// 앱 첫 화면. 브랜딩, 3단계 안내, 학습 현황 요약, 연습 시작 CTA.
 class HomeScreen extends StatefulWidget {
@@ -184,7 +185,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildStartButton() {
     return GestureDetector(
-      onTap: () => context.push('/practice').then((_) => _refresh()),
+      onTap: () {
+        TtsService.unlockAudioEngine();
+        context.push('/practice').then((_) => _refresh());
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
