@@ -1,19 +1,38 @@
-import 'dart:js' as js;
+import 'dart:js_interop';
 
+/// index.html의 전역 JS 함수 바인딩 (dart:js_interop).
+@JS('playAzureTtsWeb')
+external JSPromise<JSAny?> _playAzureTtsWeb(
+    String text, String key, String region, String voice, String rate);
+
+@JS('stopAzureTtsWeb')
+external void _stopAzureTtsWeb();
+
+@JS('playChimeWeb')
+external JSPromise<JSAny?> _playChimeWeb();
+
+/// 웹 전용 Azure TTS / 효과음 헬퍼.
+///
+/// 반환된 JS Promise를 [JSPromise.toDart]로 Future로 변환해 **실제 재생 종료까지
+/// await** 한다. (await하지 않으면 반복 듣기 시 음성이 겹쳐 메아리처럼 들린다.)
 class WebTtsHelper {
-  static Future<void> playAzureTts(String text, String key, String region, String voice, double rateMultiplier) async {
-    try {
-      js.context.callMethod('playAzureTtsWeb', [text, key, region, voice, rateMultiplier]);
-    } catch (e) {
-      print('WebTtsHelper playAzureTts error: $e');
-    }
+  static Future<void> playAzureTts(String text, String key, String region,
+      String voice, double rateMultiplier) async {
+    await _playAzureTtsWeb(
+            text, key, region, voice, rateMultiplier.toString())
+        .toDart;
   }
 
   static Future<void> stopAzureTts() async {
+    _stopAzureTtsWeb();
+  }
+
+  /// 문장 전환용 효과음 재생 (완료까지 await).
+  static Future<void> playChime() async {
     try {
-      js.context.callMethod('stopAzureTtsWeb');
-    } catch (e) {
-      print('WebTtsHelper stopAzureTts error: $e');
+      await _playChimeWeb().toDart;
+    } catch (_) {
+      // 효과음 실패는 무시
     }
   }
 }

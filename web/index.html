@@ -35,40 +35,56 @@
   <!-- Microsoft Cognitive Services Speech SDK -->
   <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
   <script>
-    window.activeSynthesizers = [];
+    // 현재 진행 중인 Azure 재생 1건만 추적한다. (player + synthesizer + resolver)
+    window.__azureActive = null;
 
     window.stopAzureTtsWeb = function() {
-      while (window.activeSynthesizers.length > 0) {
-        const syn = window.activeSynthesizers.pop();
-        try {
-          syn.close();
-        } catch (e) {
-          console.error("Error closing synthesizer: ", e);
-        }
+      const a = window.__azureActive;
+      window.__azureActive = null;
+      if (a) {
+        // 재생 중인 caller의 Promise를 풀어줘서 await가 멈추지 않게 한다.
+        if (a.settle) { try { a.settle(false); } catch (e) {} }
+        try { if (a.player && a.player.pause) a.player.pause(); } catch (e) {}
+        try { if (a.player && a.player.close) a.player.close(); } catch (e) {}
+        try { a.synthesizer.close(); } catch (e) {}
       }
     };
 
+    // speakSsmlAsync 콜백은 '합성' 완료 시점이라 실제 재생보다 빨라 메아리를 유발한다.
+    // 따라서 결과의 audioDuration(실제 오디오 길이)만큼 더 기다린 뒤 resolve 한다.
     window.playAzureTtsWeb = function(text, key, region, voice, rateMultiplier) {
       window.stopAzureTtsWeb();
-      
+
       return new Promise((resolve, reject) => {
         try {
           if (typeof SpeechSDK === 'undefined') {
-            console.error("SpeechSDK is undefined. Make sure the script is loaded.");
             reject("Azure Speech SDK is not loaded.");
             return;
           }
-          
+
           const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
           const audioConfig = SpeechSDK.AudioConfig.fromDefaultSpeakerOutput();
-          
+          const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
+
+          const entry = { synthesizer: synthesizer, player: null, settle: null, done: false, timer: null };
+          const finish = (val) => {
+            if (entry.done) return;
+            entry.done = true;
+            if (entry.timer) { try { clearTimeout(entry.timer); } catch (e) {} }
+            if (window.__azureActive === entry) window.__azureActive = null;
+            try { synthesizer.close(); } catch (e) {}
+            resolve(val);
+          };
+          entry.settle = finish;
+          window.__azureActive = entry;
+
           const escapedText = text
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&apos;');
-            
+
           const ssml = `<speak version='1.0' xml:lang='en-US'>
             <voice xml:lang='en-US' name='${voice}'>
               <prosody rate="${rateMultiplier}">
@@ -76,35 +92,62 @@
               </prosody>
             </voice>
           </speak>`;
-          
-          const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
-          window.activeSynthesizers.push(synthesizer);
-          
+
+          const t0 = performance.now();
           synthesizer.speakSsmlAsync(
             ssml,
             result => {
-              const index = window.activeSynthesizers.indexOf(synthesizer);
-              if (index > -1) {
-                window.activeSynthesizers.splice(index, 1);
-              }
-              synthesizer.close();
               if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
-                resolve(true);
+                // audioDuration은 100ns 틱 단위 → ms 환산
+                let ms = (result.audioDuration || 0) / 10000;
+                if (!ms || ms < 200) {
+                  // 폴백: 단어 수 기반 추정
+                  const words = (text.trim().split(/\s+/).length) || 1;
+                  ms = Math.max(800, words * 380);
+                }
+                // 콜백까지 이미 흐른 시간을 빼고 남은 재생 시간만 대기
+                const elapsed = performance.now() - t0;
+                const remain = Math.max(0, ms - elapsed) + 120; // 약간의 버퍼
+                entry.timer = setTimeout(() => finish(true), remain);
               } else {
-                reject("Speech synthesis failed: " + result.errorDetails);
+                finish(false);
               }
             },
-            error => {
-              const index = window.activeSynthesizers.indexOf(synthesizer);
-              if (index > -1) {
-                window.activeSynthesizers.splice(index, 1);
-              }
-              synthesizer.close();
-              reject("Speech synthesis error: " + error);
-            }
+            error => { finish(false); }
           );
         } catch (e) {
           reject("Azure Speech SDK error: " + e.toString());
+        }
+      });
+    };
+
+    // 문장 전환용 짧은 효과음 (WebAudio 비프, 에셋 불필요). 끝나면 resolve.
+    window.playChimeWeb = function() {
+      return new Promise((resolve) => {
+        try {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) { resolve(true); return; }
+          window.__chimeCtx = window.__chimeCtx || new Ctx();
+          const ctx = window.__chimeCtx;
+          if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+          const now = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          // 두 음(미→솔) 짧은 상승 차임
+          osc.frequency.setValueAtTime(660, now);
+          osc.frequency.setValueAtTime(880, now + 0.12);
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.34);
+          osc.onended = () => resolve(true);
+          setTimeout(() => resolve(true), 450); // 안전망
+        } catch (e) {
+          resolve(true);
         }
       });
     };

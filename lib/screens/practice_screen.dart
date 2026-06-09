@@ -62,7 +62,8 @@ class _PracticeScreenState extends State<PracticeScreen> {
     super.initState();
     _sequencer = PlaybackSequencer(
       speak: (t) => TtsService.speak(t),
-      gap: const Duration(milliseconds: 350),
+      repeatGap: const Duration(milliseconds: 700), // 반복 사이 간격
+      itemGap: const Duration(milliseconds: 1200), // 문장 사이 간격(더 길게)
     );
     _initSpeech();
     _loadSentences();
@@ -87,6 +88,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
     await _sequencer.play(
       [_target],
       repeatCount: _repeatCount,
+      itemGap: Duration.zero, // 단일 대상이라 문장 간격 불필요
       onProgress: (i, r) {
         if (mounted) setState(() => _playRepeat = r);
       },
@@ -113,6 +115,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
     await _sequencer.play(
       items,
       repeatCount: _repeatCount,
+      onItemBoundary: () => TtsService.playTransitionChime(),
       onProgress: (i, r) {
         if (!mounted) return;
         setState(() {

@@ -126,6 +126,14 @@ class TtsService {
     }
   }
 
+  /// 문장 전환용 효과음 (연속 듣기에서 다음 문장으로 넘어갈 때 구분음).
+  static Future<void> playTransitionChime() async {
+    if (kIsWeb) {
+      await WebTtsHelper.playChime();
+    }
+    // 네이티브는 별도 효과음 미사용 (필요 시 SystemSound 추가 가능).
+  }
+
   /// Speaks the given text aloud. Interrupts any active speech.
   /// Uses Azure Neural TTS if credentials are saved, falling back to local TTS on failure.
   static Future<void> speak(String text) async {
