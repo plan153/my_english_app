@@ -11,6 +11,9 @@ external void _stopAzureTtsWeb();
 @JS('playChimeWeb')
 external JSPromise<JSAny?> _playChimeWeb();
 
+@JS('unlockTtsAudioWeb')
+external void _unlockTtsAudioWeb();
+
 /// 웹 전용 Azure TTS / 효과음 헬퍼.
 ///
 /// 반환된 JS Promise를 [JSPromise.toDart]로 Future로 변환해 **실제 재생 종료까지
@@ -25,6 +28,13 @@ class WebTtsHelper {
 
   static Future<void> stopAzureTts() async {
     _stopAzureTtsWeb();
+  }
+
+  /// 사용자 제스처 안에서 오디오 엘리먼트를 언락 (iOS 자동재생 정책 대응).
+  static void unlockAudio() {
+    try {
+      _unlockTtsAudioWeb();
+    } catch (_) {}
   }
 
   /// 문장 전환용 효과음 재생 (완료까지 await).

@@ -35,23 +35,51 @@
   <!-- Microsoft Cognitive Services Speech SDK -->
   <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
   <script>
-    // 현재 진행 중인 Azure 재생 1건만 추적한다. (player + synthesizer + resolver)
+    // 현재 진행 중인 Azure 재생 1건만 추적한다.
     window.__azureActive = null;
+
+    // 모든 재생에 재사용하는 단일 <audio> 엘리먼트.
+    // (iOS WebKit은 AudioContext 개수를 강하게 제한하므로, 매 재생마다 SDK 내부
+    //  AudioContext를 새로 만들면 2~3회 후 무음이 된다. 데이터만 합성해 하나의
+    //  오디오 엘리먼트로 재생하면 이 제한을 피할 수 있다.)
+    window.__ttsAudioEl = null;
+    window.__getTtsAudioEl = function() {
+      if (!window.__ttsAudioEl) {
+        const el = new Audio();
+        el.preload = 'auto';
+        el.setAttribute('playsinline', '');
+        window.__ttsAudioEl = el;
+      }
+      return window.__ttsAudioEl;
+    };
+
+    // 사용자 제스처 안에서 호출해 오디오 엘리먼트를 언락한다 (iOS 자동재생 정책).
+    window.unlockTtsAudioWeb = function() {
+      try {
+        const el = window.__getTtsAudioEl();
+        el.muted = true;
+        const p = el.play();
+        if (p && p.then) {
+          p.then(() => { el.pause(); el.currentTime = 0; el.muted = false; })
+           .catch(() => { el.muted = false; });
+        } else {
+          el.pause(); el.muted = false;
+        }
+      } catch (e) {}
+    };
 
     window.stopAzureTtsWeb = function() {
       const a = window.__azureActive;
       window.__azureActive = null;
-      if (a) {
-        // 재생 중인 caller의 Promise를 풀어줘서 await가 멈추지 않게 한다.
-        if (a.settle) { try { a.settle(false); } catch (e) {} }
-        try { if (a.player && a.player.pause) a.player.pause(); } catch (e) {}
-        try { if (a.player && a.player.close) a.player.close(); } catch (e) {}
-        try { a.synthesizer.close(); } catch (e) {}
-      }
+      if (a && a.settle) { try { a.settle(false); } catch (e) {} }
+      try {
+        const el = window.__ttsAudioEl;
+        if (el) { el.pause(); }
+      } catch (e) {}
     };
 
-    // speakSsmlAsync 콜백은 '합성' 완료 시점이라 실제 재생보다 빨라 메아리를 유발한다.
-    // 따라서 결과의 audioDuration(실제 오디오 길이)만큼 더 기다린 뒤 resolve 한다.
+    // 오디오 '데이터'만 합성한 뒤(SDK 내부 오디오 출력 미사용), 재사용 오디오
+    // 엘리먼트로 재생하고 실제 'ended' 시점에 resolve 한다.
     window.playAzureTtsWeb = function(text, key, region, voice, rateMultiplier) {
       window.stopAzureTtsWeb();
 
@@ -63,15 +91,17 @@
           }
 
           const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
-          const audioConfig = SpeechSDK.AudioConfig.fromDefaultSpeakerOutput();
-          const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
+          speechConfig.speechSynthesisOutputFormat =
+            SpeechSDK.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
+          // audioConfig = null → 스피커로 직접 재생하지 않고 result.audioData 반환
+          const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, null);
 
-          const entry = { synthesizer: synthesizer, player: null, settle: null, done: false, timer: null };
+          const entry = { synthesizer: synthesizer, settle: null, done: false, url: null };
           const finish = (val) => {
             if (entry.done) return;
             entry.done = true;
-            if (entry.timer) { try { clearTimeout(entry.timer); } catch (e) {} }
             if (window.__azureActive === entry) window.__azureActive = null;
+            if (entry.url) { try { URL.revokeObjectURL(entry.url); } catch (e) {} }
             try { synthesizer.close(); } catch (e) {}
             resolve(val);
           };
@@ -93,22 +123,25 @@
             </voice>
           </speak>`;
 
-          const t0 = performance.now();
           synthesizer.speakSsmlAsync(
             ssml,
             result => {
-              if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
-                // audioDuration은 100ns 틱 단위 → ms 환산
-                let ms = (result.audioDuration || 0) / 10000;
-                if (!ms || ms < 200) {
-                  // 폴백: 단어 수 기반 추정
-                  const words = (text.trim().split(/\s+/).length) || 1;
-                  ms = Math.max(800, words * 380);
+              if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted &&
+                  result.audioData && result.audioData.byteLength > 0) {
+                try {
+                  const blob = new Blob([result.audioData], { type: 'audio/mpeg' });
+                  const url = URL.createObjectURL(blob);
+                  entry.url = url;
+                  const el = window.__getTtsAudioEl();
+                  el.onended = () => finish(true);
+                  el.onerror = () => finish(false);
+                  el.muted = false;
+                  el.src = url;
+                  const pp = el.play();
+                  if (pp && pp.catch) { pp.catch(() => finish(false)); }
+                } catch (e) {
+                  finish(false);
                 }
-                // 콜백까지 이미 흐른 시간을 빼고 남은 재생 시간만 대기
-                const elapsed = performance.now() - t0;
-                const remain = Math.max(0, ms - elapsed) + 120; // 약간의 버퍼
-                entry.timer = setTimeout(() => finish(true), remain);
               } else {
                 finish(false);
               }
