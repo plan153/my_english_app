@@ -49,14 +49,97 @@ class _PracticeScreenState extends State<PracticeScreen> {
   bool _useDemoMode = false;
   double _simAccuracy = 0.8;
 
+  // 반복/연속 듣기
+  int _repeatCount = 1; // 1/2/3회
+  bool _isPlaying = false; // 단일 또는 연속 재생 진행 중
+  int _playRepeat = 0; // 현재 반복 회차 (1-based, 표시용)
+  late final PlaybackSequencer _sequencer;
+
   String _t(String key) => TranslationService.get(key);
 
   @override
   void initState() {
     super.initState();
+    _sequencer = PlaybackSequencer(
+      speak: (t) => TtsService.speak(t),
+      gap: const Duration(milliseconds: 350),
+    );
     _initSpeech();
     _loadSentences();
     _loadTtsSettings();
+  }
+
+  @override
+  void dispose() {
+    _sequencer.stop();
+    TtsService.stop();
+    super.dispose();
+  }
+
+  /// 현재 대상(문장/청크/단어)을 반복 횟수만큼 재생.
+  Future<void> _playSingle() async {
+    if (_isPlaying) return;
+    await TtsService.unlockAudioEngine();
+    setState(() {
+      _isPlaying = true;
+      _playRepeat = 0;
+    });
+    await _sequencer.play(
+      [_target],
+      repeatCount: _repeatCount,
+      onProgress: (i, r) {
+        if (mounted) setState(() => _playRepeat = r);
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _isPlaying = false;
+        _playRepeat = 0;
+      });
+    }
+  }
+
+  /// 현재 문장부터 끝까지, 각 문장을 반복 횟수만큼 듣고 자동으로 다음 문장으로.
+  Future<void> _playContinuous() async {
+    if (_isPlaying || _sentences.isEmpty) return;
+    await TtsService.unlockAudioEngine();
+    final startIndex = _currentIndex;
+    final items = _sentences.sublist(startIndex).map((s) => s.text).toList();
+    setState(() {
+      _isPlaying = true;
+      _playRepeat = 0;
+      _level = PracticeLevel.sentence;
+    });
+    await _sequencer.play(
+      items,
+      repeatCount: _repeatCount,
+      onProgress: (i, r) {
+        if (!mounted) return;
+        setState(() {
+          _currentIndex = startIndex + i;
+          _chunkIndex = 0;
+          _wordIndex = 0;
+          _hasResult = false;
+          _playRepeat = r;
+        });
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _isPlaying = false;
+        _playRepeat = 0;
+      });
+    }
+  }
+
+  /// 재생 중단.
+  void _stopPlayback() {
+    _sequencer.stop();
+    TtsService.stop();
+    setState(() {
+      _isPlaying = false;
+      _playRepeat = 0;
+    });
   }
 
   Future<void> _loadTtsSettings() async {
@@ -520,6 +603,10 @@ class _PracticeScreenState extends State<PracticeScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 12),
+          _buildPlaybackControls(),
         ],
       ),
     );
@@ -658,10 +745,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
 
   Widget _listenButton() {
     return GestureDetector(
-      onTap: () async {
-        await TtsService.unlockAudioEngine();
-        await TtsService.speak(_target);
-      },
+      onTap: _isPlaying ? null : _playSingle,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
@@ -675,9 +759,114 @@ class _PracticeScreenState extends State<PracticeScreen> {
             const Icon(Icons.volume_up, color: AppColors.accent, size: 18),
             const SizedBox(width: 6),
             Text(
-              _t('listen'),
+              _repeatCount > 1 ? '${_t('listen')} ×$_repeatCount' : _t('listen'),
               style: const TextStyle(
                   color: AppColors.accent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 반복 횟수 선택 + 연속듣기/정지 컨트롤 행.
+  Widget _buildPlaybackControls() {
+    return Row(
+      children: [
+        Text('${_t('repeat')} ',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+        const SizedBox(width: 6),
+        for (final n in [1, 2, 3]) ...[
+          _repeatChip(n),
+          const SizedBox(width: 6),
+        ],
+        const Spacer(),
+        _isPlaying ? _stopButton() : _continuousButton(),
+      ],
+    );
+  }
+
+  Widget _repeatChip(int n) {
+    final selected = _repeatCount == n;
+    return GestureDetector(
+      onTap: _isPlaying ? null : () => setState(() => _repeatCount = n),
+      child: Container(
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accent.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected
+                ? AppColors.accent
+                : Colors.white.withValues(alpha: 0.1),
+          ),
+        ),
+        child: Text(
+          '$n',
+          style: TextStyle(
+            color: selected ? AppColors.accent : AppColors.textSecondary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _continuousButton() {
+    return GestureDetector(
+      onTap: _playContinuous,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: AppColors.brandGradient,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.playlist_play, color: Colors.white, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              _t('continuous_listen'),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stopButton() {
+    return GestureDetector(
+      onTap: _stopPlayback,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.danger.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.danger.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.stop, color: AppColors.danger, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              _playRepeat > 0
+                  ? '${_t('stop')} ($_playRepeat/$_repeatCount)'
+                  : _t('stop'),
+              style: const TextStyle(
+                  color: AppColors.danger,
                   fontSize: 13,
                   fontWeight: FontWeight.bold),
             ),

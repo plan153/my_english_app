@@ -23,3 +23,6 @@ export 'src/scoring/feedback_generator.dart';
 // Engine interfaces (구현은 앱에서 플러그인으로 주입)
 export 'src/engines/tts_engine.dart';
 export 'src/engines/speech_recognition_engine.dart';
+
+// Playback (반복/연속 듣기 시퀀서)
+export 'src/playback/playback_sequencer.dart';

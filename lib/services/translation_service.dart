@@ -122,6 +122,9 @@ class TranslationService {
     'progress_reset_confirm': '모든 학습 기록을 삭제할까요?',
     'common_cancel': '취소',
     'common_delete': '삭제',
+    'repeat': '반복',
+    'continuous_listen': '연속듣기',
+    'stop': '정지',
   };
 
   /// English fallback translations map
@@ -235,5 +238,8 @@ class TranslationService {
     'progress_reset_confirm': 'Delete all practice history?',
     'common_cancel': 'Cancel',
     'common_delete': 'Delete',
+    'repeat': 'Repeat',
+    'continuous_listen': 'Play All',
+    'stop': 'Stop',
   };
 }

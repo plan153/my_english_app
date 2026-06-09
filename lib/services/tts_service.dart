@@ -50,6 +50,9 @@ class TtsService {
   static Future<void> init() async {
     if (_isInitialized) return;
     try {
+      // speak()가 재생 완료 시점에 resolve 되도록 설정.
+      // 반복 듣기/연속 듣기 시퀀서가 다음 재생을 정확히 이어가려면 필수.
+      await _flutterTts.awaitSpeakCompletion(true);
       await _flutterTts.setLanguage('en-US');
 
       // Select the best voice for Web/Chrome to avoid low-quality metallic voices
